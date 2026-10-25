@@ -79,6 +79,13 @@ class NotesController {
     }
 
     @Idempotent
+    @PostMapping("/throttled")
+    ResponseEntity<String> throttled() {
+        runs.increment();
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).header("Retry-After", "1").body("slow down");
+    }
+
+    @Idempotent
     @PostMapping("/throws")
     Note throwsException() {
         runs.increment();

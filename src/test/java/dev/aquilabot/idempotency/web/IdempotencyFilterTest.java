@@ -239,6 +239,16 @@ class IdempotencyFilterTest {
     }
 
     @Test
+    void tooManyRequestsReleasesTheKey() throws Exception {
+        mvc.perform(post("/notes/throttled").header(KEY, key)).andExpect(status().isTooManyRequests());
+        mvc.perform(post("/notes/throttled").header(KEY, key))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(header().doesNotExist(REPLAYED));
+
+        assertThat(runs.get()).isEqualTo(2);
+    }
+
+    @Test
     void exceptionsReleaseTheKey() {
         for (int i = 0; i < 2; i++) {
             assertThatThrownBy(() -> mvc.perform(post("/notes/throws").header(KEY, key)))

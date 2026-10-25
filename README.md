@@ -92,13 +92,13 @@ idempotency.methods=POST,PATCH
 | No key on an endpoint that requires one | 400 problem+json | No |
 | Key that is empty, longer than 255 characters or not printable ASCII | 400 problem+json | No |
 | Same key after the TTL has passed | Handler's status | Yes |
-| Handler returned 5xx, threw an exception or called `sendError` | Handler's status. The key is released | Yes, again on retry |
-| Handler returned 2xx, 3xx or 4xx | Handler's status. The response is stored | No on retry |
+| Handler returned 5xx or 429, threw an exception or called `sendError` | Handler's status. The key is released | Yes, again on retry |
+| Handler returned 2xx, 3xx or any other 4xx | Handler's status. The response is stored | No on retry |
 | `@Idempotent(required = false)` without a key | Handler's status | Yes, every time |
 | Endpoint without the annotation or a matching pattern | Handler's status | Yes, every time |
 
-Why 5xx is released and 4xx is stored: the draft says a server should not keep a result that the
-client is expected to retry. A 503 or a timeout to the database is such a result. A 400 for a
+Why 5xx and 429 are released and other 4xx are stored: the draft says a server should not keep a result that the
+client is expected to retry. A 503, a 429 or a timeout to the database is such a result. A 400 for a
 missing field is not. Retrying it gives the same 400, so replaying it is correct and cheaper.
 
 A 422 looks like this:

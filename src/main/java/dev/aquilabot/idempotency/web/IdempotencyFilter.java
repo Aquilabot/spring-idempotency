@@ -58,7 +58,7 @@ import org.springframework.web.util.pattern.PathPatternParser;
  *
  * <ul>
  *   <li>No key and the key is required: 400.</li>
- *   <li>New key: the handler runs. Responses below 500 are stored, then sent. On 5xx, on an
+ *   <li>New key: the handler runs. Other responses are stored, then sent. On 5xx or 429, on an
  *       exception, or when the handler used {@code sendError}, the key is released so a retry runs
  *       the handler again.</li>
  *   <li>Known key, different fingerprint: 422.</li>
@@ -190,7 +190,7 @@ public class IdempotencyFilter extends OncePerRequestFilter {
             throw e;
         }
         try {
-            if (capturing.getStatus() >= 500 || capturing.errorSent()) {
+            if (isRetryable(capturing.getStatus()) || capturing.errorSent()) {
                 release(scope, key, token);
             } else if (!store.complete(scope, key, token, toStored(capturing))) {
                 log.warn("Idempotency claim was taken over before the response was stored (key " + key
@@ -203,6 +203,11 @@ public class IdempotencyFilter extends OncePerRequestFilter {
         } finally {
             capturing.copyBodyToResponse();
         }
+    }
+
+    /** 5xx and 429 ask the client to try again later, so the result is not kept. */
+    private static boolean isRetryable(int status) {
+        return status >= 500 || status == 429;
     }
 
     private void release(String scope, String key, String token) {
