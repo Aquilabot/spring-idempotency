@@ -37,6 +37,10 @@ cd spring-idempotency
 </dependency>
 ```
 
+The library needs Spring MVC on a servlet container, so the application already has
+`spring-boot-starter-webmvc`. For the PostgreSQL store, also add `spring-boot-starter-jdbc` and the
+PostgreSQL driver.
+
 ## Usage
 
 ```java
@@ -194,8 +198,10 @@ makes two concurrent inserts conflict, so only one wins. A plain `ON CONFLICT DO
 be safe, but expired rows would need a separate delete first. The `DO UPDATE ... WHERE` form
 takes over an expired row in the same statement.
 
-Each statement runs in its own short transaction. No row lock or transaction is held while the
-handler runs. `complete` and `release` match on a random token per claim, so an instance that lost
+Each statement runs in its own short transaction, started by the store with `REQUIRES_NEW`. It
+commits even when the pool has auto-commit turned off, which many JPA setups do. The concurrency
+test runs with `spring.datasource.hikari.auto-commit=false` for that reason. No row lock or
+transaction is held while the handler runs. `complete` and `release` match on a random token per claim, so an instance that lost
 its claim cannot overwrite or delete the new owner's row.
 
 Times come from the application's `Clock`, not from `now()` in the database. Keep instance clocks in
