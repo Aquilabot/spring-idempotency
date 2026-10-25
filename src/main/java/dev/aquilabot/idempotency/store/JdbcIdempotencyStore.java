@@ -14,7 +14,10 @@ import javax.sql.DataSource;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.jdbc.support.JdbcTransactionManager;
 import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.StreamUtils;
 
 /**
@@ -24,8 +27,9 @@ import org.springframework.util.StreamUtils;
  * <p>The claim is one statement: an {@code INSERT ... ON CONFLICT DO UPDATE ... WHERE} that only
  * overwrites a row that has expired or whose in-progress lock has expired. When it returns a row,
  * this caller owns the key. When it returns nothing, another request owns the key and its row is
- * read back. Every statement runs in its own short transaction (auto-commit); no lock is held while
- * the handler runs.
+ * read back. Every statement runs in its own short transaction, started here with
+ * {@code REQUIRES_NEW}, so it commits even when the pool has auto-commit turned off or the caller is
+ * inside another transaction. No lock is held while the handler runs.
  */
 public class JdbcIdempotencyStore implements IdempotencyStore {
 
@@ -37,6 +41,7 @@ public class JdbcIdempotencyStore implements IdempotencyStore {
 
     private final DataSource dataSource;
     private final JdbcClient jdbc;
+    private final TransactionTemplate tx;
     private final String table;
     private final String claimSql;
     private final String selectSql;
@@ -54,6 +59,8 @@ public class JdbcIdempotencyStore implements IdempotencyStore {
         }
         this.dataSource = dataSource;
         this.jdbc = JdbcClient.create(dataSource);
+        this.tx = new TransactionTemplate(new JdbcTransactionManager(dataSource));
+        this.tx.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         this.table = table;
         this.claimSql = """
                 INSERT INTO %1$s AS t
@@ -95,8 +102,9 @@ public class JdbcIdempotencyStore implements IdempotencyStore {
     public void createSchema() {
         try (var in = new ClassPathResource(SCHEMA_LOCATION).getInputStream()) {
             String script = StreamUtils.copyToString(in, StandardCharsets.UTF_8).replace(DEFAULT_TABLE, table);
-            new ResourceDatabasePopulator(new ByteArrayResource(script.getBytes(StandardCharsets.UTF_8)))
-                    .execute(dataSource);
+            ResourceDatabasePopulator populator =
+                    new ResourceDatabasePopulator(new ByteArrayResource(script.getBytes(StandardCharsets.UTF_8)));
+            tx.executeWithoutResult(status -> populator.execute(dataSource));
         } catch (java.io.IOException e) {
             throw new IllegalStateException("Cannot read " + SCHEMA_LOCATION, e);
         }
@@ -105,18 +113,18 @@ public class JdbcIdempotencyStore implements IdempotencyStore {
     @Override
     public ClaimResult claim(ClaimRequest request) {
         for (int attempt = 1; attempt <= CLAIM_ATTEMPTS; attempt++) {
-            List<String> owned = jdbc.sql(claimSql)
+            List<String> owned = tx.execute(status -> jdbc.sql(claimSql)
                     .params(request.scope(), request.key(), request.fingerprint(), request.token(),
                             utc(request.now()), utc(request.lockedUntil()), utc(request.expiresAt()))
                     .query(String.class)
-                    .list();
+                    .list());
             if (!owned.isEmpty()) {
                 return new ClaimResult.Acquired();
             }
-            Optional<IdempotencyRecord> existing = jdbc.sql(selectSql)
+            Optional<IdempotencyRecord> existing = tx.execute(status -> jdbc.sql(selectSql)
                     .params(request.scope(), request.key())
                     .query(this::mapRecord)
-                    .optional();
+                    .optional());
             if (existing.isPresent()) {
                 return new ClaimResult.Existing(existing.get());
             }
@@ -129,19 +137,22 @@ public class JdbcIdempotencyStore implements IdempotencyStore {
 
     @Override
     public boolean complete(String scope, String key, String token, StoredResponse response) {
-        return jdbc.sql(completeSql)
-                .params(response.status(), response.encodeHeaders(), response.body(), scope, key, token)
-                .update() == 1;
+        return update(completeSql, response.status(), response.encodeHeaders(), response.body(), scope, key, token) == 1;
     }
 
     @Override
     public boolean release(String scope, String key, String token) {
-        return jdbc.sql(releaseSql).params(scope, key, token).update() == 1;
+        return update(releaseSql, scope, key, token) == 1;
     }
 
     @Override
     public int deleteExpired(Instant now) {
-        return jdbc.sql(deleteExpiredSql).params(utc(now), utc(now)).update();
+        return update(deleteExpiredSql, utc(now), utc(now));
+    }
+
+    private int update(String sql, Object... params) {
+        Integer rows = tx.execute(status -> jdbc.sql(sql).params(params).update());
+        return rows == null ? 0 : rows;
     }
 
     private IdempotencyRecord mapRecord(ResultSet rs, int row) throws SQLException {

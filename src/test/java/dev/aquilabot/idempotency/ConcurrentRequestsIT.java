@@ -73,6 +73,8 @@ class ConcurrentRequestsIT {
                 "--spring.datasource.username=" + postgres.getUsername(),
                 "--spring.datasource.password=" + postgres.getPassword(),
                 "--spring.datasource.hikari.maximum-pool-size=20",
+                // Many JPA setups turn auto-commit off. The store must still commit its own statements.
+                "--spring.datasource.hikari.auto-commit=false",
                 "--idempotency.store=jdbc",
                 "--idempotency.jdbc.initialize-schema=true",
                 "--demo.handler-delay-ms=300");
