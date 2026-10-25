@@ -248,6 +248,16 @@ class IdempotencyFilterTest {
     }
 
     @Test
+    void responsesSentWithSendErrorReleaseTheKey() throws Exception {
+        for (int i = 0; i < 2; i++) {
+            mvc.perform(post("/notes/missing").header(KEY, key))
+                    .andExpect(status().isNotFound())
+                    .andExpect(header().doesNotExist(REPLAYED));
+        }
+        assertThat(runs.get()).isEqualTo(2);
+    }
+
+    @Test
     void clientErrorsAreStoredAndReplayed() throws Exception {
         mvc.perform(post("/notes/rejected").header(KEY, key))
                 .andExpect(status().isBadRequest())

@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 
 @RestController
 @RequestMapping("/notes")
@@ -82,6 +83,13 @@ class NotesController {
     Note throwsException() {
         runs.increment();
         throw new IllegalStateException("handler failed");
+    }
+
+    @Idempotent
+    @PostMapping("/missing")
+    Note missing() {
+        runs.increment();
+        throw new ResponseStatusException(HttpStatus.NOT_FOUND, "no such list");
     }
 
     @Idempotent
