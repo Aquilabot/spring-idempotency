@@ -1,5 +1,7 @@
 # spring-idempotency
 
+[![CI](https://github.com/Aquilabot/spring-idempotency/actions/workflows/ci.yml/badge.svg)](https://github.com/Aquilabot/spring-idempotency/actions/workflows/ci.yml)
+
 Support for the `Idempotency-Key` request header in Spring Boot MVC. A client retries a POST or
 PATCH with the same key, and the server replays the first response instead of running the handler
 a second time.
